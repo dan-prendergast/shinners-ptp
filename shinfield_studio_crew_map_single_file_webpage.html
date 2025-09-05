@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Palm Tree Panic — Shinfield Studios Crew Map</title>
+  <!-- TailwindCSS (CDN) for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet CSS/JS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <style>
+    html, body { height: 100%; }
+    #map { height: 100%; }
+    .leaflet-container { font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; }
+    /* Simple marker color dots */
+    .legend-dot { width: 10px; height: 10px; border-radius: 9999px; display: inline-block; margin-right: 6px; }
+  </style>
+</head>
+<body class="h-screen bg-slate-50">
+  <div class="flex h-full">
+    <!-- Sidebar -->
+    <aside class="w-full max-w-md shrink-0 border-r bg-white/80 backdrop-blur p-4 md:p-6 overflow-y-auto">
+      <header class="mb-4">
+        <h1 class="text-2xl font-semibold flex items-center gap-2"><span class="text-emerald-600">🌴 Palm Tree Panic</span> — Shinfield Studios Crew Map</h1>
+        <p class="text-slate-600 text-sm">Tap a place to zoom. Use filters and search to find crew essentials.</p>
+      </header>
+
+      <!-- Search -->
+      <div class="mb-4">
+        <label for="search" class="block text-sm font-medium mb-1">Search</label>
+        <input id="search" type="text" placeholder="e.g., Catering, Stage A, Wardrobe" class="w-full rounded-xl border px-3 py-2 outline-none focus:ring-2 focus:ring-sky-400" />
+      </div>
+
+      <!-- Filters -->
+      <details class="mb-4" open>
+        <summary class="cursor-pointer select-none text-sm font-semibold mb-2">Filters</summary>
+        <div id="filters" class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm"></div>
+      </details>
+
+      <!-- Legend (auto-filled) -->
+      <div class="mb-4" id="legend"></div>
+
+      <!-- Results count -->
+      <div class="text-xs text-slate-500 mb-2" id="resultCount"></div>
+
+      <!-- Places list -->
+      <ul id="placeList" class="space-y-2"></ul>
+
+      <footer class="pt-6 text-xs text-slate-500">
+        <p>
+          ⚙️ <span class="font-semibold">Customize:</span> Edit <code>PLACES</code> below to add/remove items or update coordinates.
+          Coordinates use <code>[lat, lng]</code>.
+        </p>
+        <p class="mt-1">💡 Tip: Right‑click the map to copy clicked coordinates into your clipboard.</p>
+      </footer>
+
+      <!-- Data import (CSV/GeoJSON) -->
+      <details class="mt-4">
+        <summary class="cursor-pointer select-none text-sm font-semibold">Import places (CSV/GeoJSON)</summary>
+        <div class="mt-2 text-sm space-y-2">
+          <input id="fileInput" type="file" accept=".csv,.geojson,application/geo+json,application/json" class="block w-full text-sm" />
+          <p class="text-slate-600">CSV headers: <code>name,category,lat,lng,description,hours,contact</code></p>
+          <p class="text-slate-500">Drag in a site export and the map/list will update instantly.</p>
+        </div>
+      </details>
+    </aside>
+
+    <!-- Map -->
+    <main class="flex-1">
+      <div id="map"></div>
+    </main>
+  </div>
+
+  <script>
+    // ========================
+    // 1) CONFIGURABLE DATA
+    // ========================
+    // Approx centre: Shinfield, Berkshire, UK. Adjust if needed.
+    const MAP_CENTER = [51.4039, -0.9539];
+    const MAP_ZOOM = 15; // 15 for site-level; adjust to taste
+
+    // Category palette (kept simple; change to suit your site legend)
+    const CATEGORY_COLORS = {
+      "Stages": "#10b981",        // emerald
+      "Parking": "#0ea5e9",       // sky
+      "Access & Security": "#ef4444", // red
+      "Departments": "#7c3aed",   // violet
+      "Food & Drink": "#f59e0b",  // amber
+      "Welfare": "#14b8a6",       // teal
+      "Medical": "#dc2626",       // red-700
+      "Transport": "#3b82f6",     // blue
+      "Toilets": "#475569",       // slate
+      "Other": "#6b7280"          // grey
+    };
+
+    // Example places — replace with your real on‑site points
+    // You can duplicate objects, change titles/descriptions, and set precise coordinates
+    const PLACES = [
+      // TODO: Replace placeholders with exact on‑lot coordinates once provided
+      { name: "Main Security Gate", category: "Access & Security", coords: [51.40195, -0.95190], description: "Primary vehicle gate on South Avenue.", hours: "24/7" },
+      { name: "Visitors Car Park", category: "Parking", coords: [51.40130, -0.95490], description: "Signposted from South Avenue." },
+      { name: "Stages 1–4", category: "Stages", coords: [51.40480, -0.95220], description: "Block A. (placeholder pin)" },
+      { name: "Stages 5–8", category: "Stages", coords: [51.40520, -0.95490], description: "Block B. (placeholder pin)" },
+      { name: "Production Offices", category: "Departments", coords: [51.4040, -0.9510], description: "Palm Tree Panic HQ on-lot. (placeholder)" },
+      { name: "Catering", category: "Food & Drink", coords: [51.4030, -0.9579], description: "Service hours to be confirmed." },
+      { name: "Medical / First Aid", category: "Medical", coords: [51.4025, -0.9531], description: "On‑site medic. AED available." }
+    ];
+
+    // ========================
+    // 2) MAP INITIALISATION
+    // ========================
+    const map = L.map('map', { zoomControl: false });
+    map.setView(MAP_CENTER, MAP_ZOOM);
+
+    // Base layer (OpenStreetMap)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 20,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Controls
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    // Right‑click to copy coordinates
+    map.on('contextmenu', (e) => {
+      const text = `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
+      navigator.clipboard?.writeText(text);
+      L.popup({ autoClose: true, closeOnClick: true })
+        .setLatLng(e.latlng)
+        .setContent(`<div class="text-sm">Copied: <code>${text}</code></div>`)
+        .openOn(map);
+    });
+
+    // ========================
+    // 3) MARKERS & LEGEND
+    // ========================
+    const markers = [];
+
+    function categoryColor(cat) {
+      return CATEGORY_COLORS[cat] || CATEGORY_COLORS["Other"]; 
+    }
+
+    function makeMarker(place) {
+      // Simple circle markers for clarity on small layouts
+      const m = L.circleMarker(place.coords, {
+        radius: 8,
+        weight: 2,
+        color: categoryColor(place.category),
+        fillColor: categoryColor(place.category),
+        fillOpacity: 0.3
+      });
+      m.bindPopup(
+        `<div class="font-semibold">${place.name}</div>` +
+        `<div class="text-xs text-slate-600">${place.category}</div>` +
+        (place.description ? `<div class="mt-1 text-sm">${place.description}</div>` : '') +
+        (place.hours ? `<div class="mt-1 text-xs">Hours: ${place.hours}</div>` : '') +
+        (place.contact ? `<div class="mt-1 text-xs">Contact: ${place.contact}</div>` : '')
+      );
+      m.on('click', () => highlightListItem(place));
+      return m;
+    }
+
+    const layerGroup = L.layerGroup().addTo(map);
+
+    function renderMarkers(list) {
+      layerGroup.clearLayers();
+      markers.length = 0;
+      list.forEach(p => {
+        const marker = makeMarker(p).addTo(layerGroup);
+        markers.push({ place: p, marker });
+      });
+      if (list.length) {
+        const bounds = L.latLngBounds(list.map(p => p.coords));
+        map.fitBounds(bounds.pad(0.2));
+      } else {
+        map.setView(MAP_CENTER, MAP_ZOOM);
+      }
+    }
+
+    // ========================
+    // 4) FILTERS, SEARCH, LIST
+    // ========================
+    const categories = Array.from(new Set(PLACES.map(p => p.category)));
+
+    // Build filter checkboxes
+    const filtersEl = document.getElementById('filters');
+    const activeCats = new Set(categories); // start with all on
+
+    categories.sort().forEach(cat => {
+      const id = `cat-${cat.replace(/\W+/g, '-').toLowerCase()}`;
+      const wrap = document.createElement('label');
+      wrap.className = 'inline-flex items-center gap-2';
+      wrap.innerHTML = `
+        <input type="checkbox" id="${id}" class="rounded border" checked />
+        <span class="legend-dot" style="background:${categoryColor(cat)}"></span>
+        <span>${cat}</span>
+      `;
+      filtersEl.appendChild(wrap);
+      document.getElementById(id).addEventListener('change', (e) => {
+        if (e.target.checked) activeCats.add(cat); else activeCats.delete(cat);
+        refresh();
+      });
+    });
+
+    // Legend
+    const legendEl = document.getElementById('legend');
+    legendEl.innerHTML = `<div class="text-xs text-slate-500">Legend: ${categories.map(cat => `
+      <span class="mr-3"><span class="legend-dot" style="background:${categoryColor(cat)}"></span>${cat}</span>
+    `).join('')}</div>`;
+
+    // Search
+    const searchEl = document.getElementById('search');
+    let searchTerm = '';
+    searchEl.addEventListener('input', () => {
+      searchTerm = searchEl.value.trim().toLowerCase();
+      refresh();
+    });
+
+    // List rendering
+    const placeListEl = document.getElementById('placeList');
+    const resultCountEl = document.getElementById('resultCount');
+
+    function highlightListItem(place) {
+      const item = placeListEl.querySelector(`[data-name="${CSS.escape(place.name)}"]`);
+      if (!item) return;
+      item.classList.add('ring-2','ring-sky-400');
+      setTimeout(() => item.classList.remove('ring-2','ring-sky-400'), 800);
+    }
+
+    function renderList(list) {
+      placeListEl.innerHTML = '';
+      resultCountEl.textContent = `${list.length} place${list.length === 1 ? '' : 's'} shown`;
+
+      list
+        .slice()
+        .sort((a,b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+        .forEach(place => {
+          const li = document.createElement('li');
+          li.dataset.name = place.name;
+          li.className = 'bg-white rounded-xl border p-3 shadow-sm hover:shadow transition cursor-pointer';
+          li.innerHTML = `
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="font-medium">${place.name}</div>
+                <div class="text-xs text-slate-500">${place.category}</div>
+              </div>
+              <div class="text-xs px-2 py-1 rounded-full" style="background:${categoryColor(place.category)}20; border:1px solid ${categoryColor(place.category)}40">${place.coords[0].toFixed(4)}, ${place.coords[1].toFixed(4)}</div>
+            </div>
+            ${place.description ? `<p class="mt-2 text-sm text-slate-700">${place.description}</p>` : ''}
+            ${place.hours ? `<p class="mt-1 text-xs text-slate-600"><span class="font-semibold">Hours:</span> ${place.hours}</p>` : ''}
+            ${place.contact ? `<p class="mt-1 text-xs text-slate-600"><span class="font-semibold">Contact:</span> ${place.contact}</p>` : ''}
+          `;
+          li.addEventListener('click', () => {
+            const m = markers.find(m => m.place === place)?.marker;
+            if (m) {
+              map.setView(m.getLatLng(), Math.max(map.getZoom(), 17), { animate: true });
+              m.openPopup();
+            }
+          });
+          placeListEl.appendChild(li);
+        });
+    }
+
+    function applyFilters() {
+      return PLACES.filter(p => activeCats.has(p.category))
+                   .filter(p => !searchTerm ||
+                     p.name.toLowerCase().includes(searchTerm) ||
+                     (p.description||'').toLowerCase().includes(searchTerm) ||
+                     p.category.toLowerCase().includes(searchTerm)
+                   );
+    }
+
+    function refresh() {
+      const filtered = applyFilters();
+      renderMarkers(filtered);
+      renderList(filtered);
+    }
+
+    // Initial render
+    refresh();
+
+    // ========================
+    // 5) IMPORT HANDLERS
+    // ========================
+    const fileInput = document.getElementById('fileInput');
+    if (fileInput) {
+      fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        try {
+          if (file.name.endsWith('.geojson') || file.type.includes('geo+json') || file.type.includes('json')) {
+            const gj = JSON.parse(text);
+            const feats = (gj.features||[]).map(f => ({
+              name: f.properties?.name || 'Unnamed',
+              category: f.properties?.category || 'Other',
+              coords: [f.geometry.coordinates[1], f.geometry.coordinates[0]],
+              description: f.properties?.description || '',
+              hours: f.properties?.hours || '',
+              contact: f.properties?.contact || ''
+            }));
+            PLACES.length = 0; PLACES.push(...feats);
+          } else { // CSV
+            const rows = text.split(/?
+/).filter(Boolean); const headers = rows.shift().split(',').map(h=>h.trim().toLowerCase());
+            const get = (obj, key) => obj[headers.indexOf(key)]?.trim() || '';
+            const list = rows.map(line => {
+              const cols = line.match(/(?:\"([^\"]*)\"|[^,])+/g)?.map(s=>s.replace(/^\"|\"$/g,'')) || line.split(',');
+              const obj = cols;
+              return {
+                name: get(obj,'name'),
+                category: get(obj,'category') || 'Other',
+                coords: [parseFloat(get(obj,'lat')), parseFloat(get(obj,'lng'))],
+                description: get(obj,'description'),
+                hours: get(obj,'hours'),
+                contact: get(obj,'contact')
+              };
+            }).filter(r => !Number.isNaN(r.coords[0]) && !Number.isNaN(r.coords[1]));
+            if (list.length) { PLACES.length = 0; PLACES.push(...list); }
+          }
+          refresh();
+        } catch (err) {
+          alert('Import failed: ' + (err?.message || err));
+        }
+      });
+    }
+  </script>
+</body>
+</html>
